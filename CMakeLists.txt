@@ -11,8 +11,8 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${DK_BUILD_DIR})
 
 add_subdirectory(external/SDL2)
 
-file(GLOB SRC code/*.cc)
-file(GLOB HDR code/*.hh)
+file(GLOB SRC code/*.c*)
+file(GLOB HDR code/*.h*)
 
 include_directories(external/SDL2/include)
 include_directories(external/glm/)

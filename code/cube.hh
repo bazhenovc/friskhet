@@ -1,4 +1,4 @@
-static FVertex cubeVertices[] = {
+static FVertexBuffer::FixedVertex cubeVertices[] = {
     {
         { 1.000000, 1.000000, -1.000000 }, // Vertex
         { 0.000000, 0.000000 }, // Texcoord 0
@@ -144,4 +144,4 @@ static FVertex cubeVertices[] = {
         { 1.000000, 0.000000, 0.000000 }, // Normal
     }
 };
-static FIndex cubeIndices[36] = { 0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, 8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, 16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20 };
+static FIndexBuffer::FixedIndex cubeIndices[36] = { 0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, 8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, 16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20 };
