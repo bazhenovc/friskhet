@@ -1,5 +1,7 @@
 
 #include "r_draw.hh"
+#include "r_debugfont.hh"
+#include "e_profiler.hh"
 
 #include <vector>
 
@@ -8,49 +10,6 @@
 #ifdef F_RASTERIZER_VIZ_COVERAGE
 #define FULL_COVERED_COLOR 0x000000FF
 #define PARTIALLY_COVERED_COLOR 0x00FF0000
-#endif
-
-//#define F_PROFILE_RASTERIZER 1
-#ifdef F_PROFILE_RASTERIZER
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#endif
-
-struct FNamedProfiler
-{
-    std::chrono::high_resolution_clock::time_point tmStart;
-    const char* name;
-
-    F_INLINE FNamedProfiler(const char* profName)
-        : name(profName)
-    {
-        tmStart = std::chrono::high_resolution_clock::now();
-    }
-
-    F_INLINE ~FNamedProfiler()
-    {
-        auto tmEnd = std::chrono::high_resolution_clock::now();
-
-        std::cout << "[profile] " << name << " : " << std::chrono::duration_cast<std::chrono::milliseconds>(tmEnd - tmStart).count() << "ms" << std::endl;
-    }
-};
-
-void F_ClearConsole()
-{
-#ifdef _WIN32
-    COORD topLeft = { 0, 0 };
-    HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
-    SetConsoleCursorPosition(console, topLeft);
-#else
-    std::cout << "\x1B[2J\x1B[H";
-#endif
-}
-
-#define F_NAMED_PROFILE(X) FNamedProfiler prof_##X(#X)
-#else
-#define F_NAMED_PROFILE(X)
 #endif
 
 // utils
@@ -108,6 +67,35 @@ struct FPoint3D
     float y;
     float z;
 };
+
+static F_INLINE FPoint3D operator*(const FPoint3D& pt, float f)
+{
+    return { pt.x * f, pt.y * f, pt.z * f };
+}
+
+static F_INLINE FPoint3D operator/(const FPoint3D& pt, float f)
+{
+    return { pt.x / f, pt.y / f, pt.z / f };
+}
+
+static F_INLINE FPoint3D operator+(const FPoint3D& pt0, const FPoint3D& pt1)
+{
+    return { pt0.x + pt1.x, pt0.y + pt1.y, pt0.z + pt1.z };
+}
+static F_INLINE FPoint3D operator-(const FPoint3D& pt0, const FPoint3D& pt1)
+{
+    return { pt0.x - pt1.x, pt0.y - pt1.y, pt0.z - pt1.z };
+}
+
+static F_INLINE FPoint3D operator*(const FPoint3D& pt0, const FPoint3D& pt1)
+{
+    return { pt0.x * pt1.x, pt0.y * pt1.y, pt0.z * pt1.z };
+}
+
+static F_INLINE FPoint3D operator/(const FPoint3D& pt0, const FPoint3D& pt1)
+{
+    return { pt0.x / pt1.x, pt0.y / pt1.y, pt0.z / pt1.z };
+}
 
 struct FPoint4D
 {
@@ -182,7 +170,7 @@ struct SSPoint2D // screen-space point
 {
     IPoint2D position;
     float    depth;
-    FPoint2D texcoord;
+    FPoint3D texcoord; // (U/Z, V/Z, 1/Z)
 };
 
 struct SSTri // screen-space triangle
@@ -191,23 +179,6 @@ struct SSTri // screen-space triangle
     SSPoint2D v1;
     SSPoint2D v2;
 };
-
-// draw context
-struct DrawContext
-{
-    std::vector<SSTri> screenTris;
-
-    FRenderTarget*     colorRT = nullptr;
-    FRenderTarget*     depthRT = nullptr;
-
-    FVertexBuffer*     vertexBuffer = nullptr;
-    FIndexBuffer*      indexBuffer  = nullptr;
-
-    TDrawMatrix        matrices[DM_COUNT];
-    TDrawMatrix        MVP;
-
-    F_INLINE bool IsValid() const { return colorRT != nullptr && depthRT != nullptr; }
-} g_drawContext;
 
 // rasterizer
 static F_INLINE FPoint3D CalculateBarycentricCoords(const SSTri& tri, const IPoint2D& pt)
@@ -256,7 +227,7 @@ static F_INLINE void WriteTriPixel(FRenderTarget* colorRT, FRenderTarget* depthR
 
     float    bdepth    = tri.v0.depth * blerp.x + tri.v1.depth * blerp.y + tri.v2.depth * blerp.z;
     float    depth     = GetPixel<TPixelDepth>(depthRT, x, y);
-    FPoint2D btexcoord = tri.v0.texcoord * blerp.x + tri.v1.texcoord * blerp.y + tri.v2.texcoord * blerp.z;
+    FPoint3D btexcoord = tri.v0.texcoord * blerp.x + tri.v1.texcoord * blerp.y + tri.v2.texcoord * blerp.z;
     int tx             = iround(btexcoord.x * 4.0F);
     int ty             = iround(btexcoord.y * 4.0F);
     //TPixelARGB8 color  = GetPixel<TPixelARGB8>(ctx.texture0, tx, ty);
@@ -315,6 +286,13 @@ static void RasterizeTriangles(FRenderTarget* colorRT, FRenderTarget* depthRT, s
         minx &= ~(q - 1);
         miny &= ~(q - 1);
 
+        // Clip
+        minx = imax(0, imin(minx, colorRT->width - 1));
+        maxx = imax(0, imin(maxx, colorRT->width - 1));
+
+        miny = imax(0, imin(miny, colorRT->height - 1));
+        maxy = imax(0, imin(maxy, colorRT->height - 1));
+
         // Half-edge constants
         int C1 = DY12 * X1 - DX12 * Y1;
         int C2 = DY23 * X2 - DX23 * Y2;
@@ -365,8 +343,8 @@ static void RasterizeTriangles(FRenderTarget* colorRT, FRenderTarget* depthRT, s
                             #else
                             WriteTriPixel(colorRT, depthRT, ix, iy, tri);
                             #endif
-                            }
                         }
+                    }
                 } else { // Partially covered block
                     int CY1 = C1 + DX12 * y0 - DY12 * x0;
                     int CY2 = C2 + DX23 * y0 - DY23 * x0;
@@ -400,6 +378,23 @@ static void RasterizeTriangles(FRenderTarget* colorRT, FRenderTarget* depthRT, s
         }
     }
 }
+
+// draw context
+struct DrawContext
+{
+    std::vector<SSTri> screenTris;
+
+    FRenderTarget*     colorRT = nullptr;
+    FRenderTarget*     depthRT = nullptr;
+
+    FVertexBuffer*     vertexBuffer = nullptr;
+    FIndexBuffer*      indexBuffer  = nullptr;
+
+    TDrawMatrix        matrices[DM_COUNT];
+    TDrawMatrix        MVP;
+
+    F_INLINE bool IsValid() const { return colorRT != nullptr && depthRT != nullptr; }
+} g_drawContext;
 
 // render targets
 FRenderTarget* FRenderTarget::Allocate(uint32_t width, uint32_t height, EPixelFormat format)
@@ -471,16 +466,20 @@ static F_INLINE void ProjectTriangle(const WSTri& tri)
     v1 = Mul(g_drawContext.MVP, v1);
     v2 = Mul(g_drawContext.MVP, v2);
 
-    const FPoint4D half{ 0.5F, 0.5F, 0.5F, 0.0F };
+    const FPoint4D half{ 0.5F, 0.5F, 0.0F, 0.0F };
     const FPoint4D vp  { fround(g_drawContext.colorRT->width), fround(g_drawContext.colorRT->height), 1.0F, 1.0F };
 
     v0 = ((v0 / v0.w) * 0.5F + half) * vp;
     v1 = ((v1 / v1.w) * 0.5F + half) * vp;
     v2 = ((v2 / v2.w) * 0.5F + half) * vp;
 
-    SSPoint2D p0 = { iround(v0.x), iround(v0.y), v0.z, { tri.v0.vs_texcoord[0], tri.v0.vs_texcoord[1] } };
-    SSPoint2D p1 = { iround(v1.x), iround(v1.y), v1.z, { tri.v1.vs_texcoord[0], tri.v1.vs_texcoord[1] } };
-    SSPoint2D p2 = { iround(v2.x), iround(v2.y), v2.z, { tri.v2.vs_texcoord[0], tri.v2.vs_texcoord[1] } };
+    FPoint3D v0_tex{ tri.v0.vs_texcoord[0], tri.v0.vs_texcoord[1], v0.z };
+    FPoint3D v1_tex{ tri.v1.vs_texcoord[0], tri.v1.vs_texcoord[1], v1.z };
+    FPoint3D v2_tex{ tri.v2.vs_texcoord[0], tri.v2.vs_texcoord[1], v2.z };
+
+    SSPoint2D p0 = { iround(v0.x), iround(v0.y), v0.z, v0_tex };
+    SSPoint2D p1 = { iround(v1.x), iround(v1.y), v1.z, v1_tex };
+    SSPoint2D p2 = { iround(v2.x), iround(v2.y), v2.z, v2_tex };
 
     SSTri stri{p0, p1, p2};
     if (ClipTriangle(stri)) {
@@ -509,9 +508,6 @@ void fglClear(uint32_t color, float depth)
         for (ptrdiff_t i = 0; i < g_drawContext.depthRT->width * g_drawContext.depthRT->height; ++i)
             pixels[i] = depth;
     }
-#ifdef F_PROFILE_RASTERIZER
-    F_ClearConsole();
-#endif
 }
 
 void fglPresent()
@@ -543,6 +539,8 @@ void fglSetIndexBuffer(FIndexBuffer* ibuf)
 
 void fglDraw(size_t offset, size_t count)
 {
+    F_NAMED_PROFILE(Vertex_Processing);
+
     for (size_t idx = offset; idx < count; idx += 3) {
         const FVertexBuffer::FixedVertex& v0 = g_drawContext.vertexBuffer->data[idx + 0];
         const FVertexBuffer::FixedVertex& v1 = g_drawContext.vertexBuffer->data[idx + 1];
@@ -555,6 +553,8 @@ void fglDraw(size_t offset, size_t count)
 
 void fglDrawIndexed(size_t offset, size_t count)
 {
+    F_NAMED_PROFILE(Vertex_Processing);
+
     for (size_t idx = offset; idx < count; idx += 3) {
         const FVertexBuffer::FixedVertex& v0 = g_drawContext.vertexBuffer->data[g_drawContext.indexBuffer->data[idx + 0]];
         const FVertexBuffer::FixedVertex& v1 = g_drawContext.vertexBuffer->data[g_drawContext.indexBuffer->data[idx + 1]];
@@ -565,3 +565,24 @@ void fglDrawIndexed(size_t offset, size_t count)
     }
 }
 
+void fglDrawDebugText(FRenderTarget* rt, const char* text, int x, int y)
+{
+    int dx = x;
+    int dy = y;
+
+    for (const char* c = text; *c; ++c) {
+        size_t fontOffset = *c;
+
+        for (int iy = 0; iy < 8; ++iy) {
+            for (int ix = 0; ix < 8; ++ix) {
+                uint8_t bit = 1 << (7 - ix);
+                uint8_t fontPixel = g_debugFont[fontOffset * 8 + iy] & bit ? 255 : 0;
+
+                TPixelARGB8* pixels = reinterpret_cast<TPixelARGB8*>(rt->pixels);
+                pixels[(iy + dy) * rt->width + (ix + dx)] = F_ARGB(255, fontPixel, fontPixel, fontPixel);
+            }
+        }
+
+        dx += 8;
+    }
+}

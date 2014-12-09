@@ -1,13 +1,7 @@
 
 #pragma once
 
-#include <stdint.h>
-
-#ifdef _WIN32
-#define F_INLINE __forceinline
-#else
-#define F_INLINE inline
-#endif
+#include "e_common.hh"
 
 enum EPixelFormat
 {
@@ -94,3 +88,6 @@ void fglSetIndexBuffer(FIndexBuffer* ibuf);
 
 void fglDraw(size_t offset, size_t count);
 void fglDrawIndexed(size_t offset, size_t count);
+
+// debug font
+void fglDrawDebugText(FRenderTarget* rt, const char* text, int x, int y);

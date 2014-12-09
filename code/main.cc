@@ -1,6 +1,8 @@
 
 #include <SDL.h>
+
 #include "r_draw.hh"
+#include "e_profiler.hh"
 
 #include "cube.hh"
 
@@ -31,39 +33,51 @@ void F_GameStep()
 
     fglClear(0x00FFFF00, 1.0F);
 
-    //F_NAMED_PROFILE(Frame);
-
     {
-        //F_NAMED_PROFILE(Vertex_Processing);
+        F_NAMED_PROFILE(Frame);
+        {
+            glm::mat4 perspective = glm::perspective(45.0F, float(WIDTH) / float(HEIGHT), 0.01F, 1000.0F) * glm::translate(-g_cameraPos);
+            glm::mat4 rotation = glm::mat4_cast(glm::quat(glm::vec3(time, time, time)));
 
-        glm::mat4 perspective = glm::perspective(45.0F, float(WIDTH) / float(HEIGHT), 0.01F, 1000.0F) * glm::translate(-g_cameraPos);
-        glm::mat4 rotation = glm::mat4_cast(glm::quat(glm::vec3(time, time, time)));
+            glm::mat4 modelview[] = {
+                glm::translate(glm::vec3( 0.0F,  0.0F, -10.0F)) * rotation,
+                glm::translate(glm::vec3(-5.0F,  0.0F, -10.0F)) * rotation,
+                glm::translate(glm::vec3( 5.0F,  0.0F, -10.0F)) * rotation,
 
-        glm::mat4 modelview[] = {
-            glm::translate(glm::vec3( 0.0F,  0.0F, -10.0F)) * rotation,
-            glm::translate(glm::vec3(-5.0F,  0.0F, -10.0F)) * rotation,
-            glm::translate(glm::vec3( 5.0F,  0.0F, -10.0F)) * rotation,
+                glm::translate(glm::vec3( 0.0F,  3.5F, -10.0F)) * rotation,
+                glm::translate(glm::vec3(-5.0F,  3.5F, -10.0F)) * rotation,
+                glm::translate(glm::vec3( 5.0F,  3.5F, -10.0F)) * rotation,
 
-            glm::translate(glm::vec3( 0.0F,  3.5F, -10.0F)) * rotation,
-            glm::translate(glm::vec3(-5.0F,  3.5F, -10.0F)) * rotation,
-            glm::translate(glm::vec3( 5.0F,  3.5F, -10.0F)) * rotation,
+                glm::translate(glm::vec3( 0.0F, -3.5F, -10.0F)) * rotation,
+                glm::translate(glm::vec3(-5.0F, -3.5F, -10.0F)) * rotation,
+                glm::translate(glm::vec3( 5.0F, -3.5F, -10.0F)) * rotation,
+            };
 
-            glm::translate(glm::vec3( 0.0F, -3.5F, -10.0F)) * rotation,
-            glm::translate(glm::vec3(-5.0F, -3.5F, -10.0F)) * rotation,
-            glm::translate(glm::vec3( 5.0F, -3.5F, -10.0F)) * rotation,
-        };
+            fglSetMatrix(DM_PROJECTION, glm::value_ptr(perspective));
 
-        fglSetMatrix(DM_PROJECTION, glm::value_ptr(perspective));
-
-        for (size_t i = 0; i < 9; ++i) {
-            fglSetMatrix(DM_MODELVIEW, glm::value_ptr(modelview[i]));
-            fglSetVertexBuffer(g_cubeVB);
-            fglSetIndexBuffer(g_cubeIB);
-            fglDrawIndexed(0, 36);
+            for (size_t i = 0; i < 9; ++i) {
+                fglSetMatrix(DM_MODELVIEW, glm::value_ptr(modelview[i]));
+                fglSetVertexBuffer(g_cubeVB);
+                fglSetIndexBuffer(g_cubeIB);
+                fglDrawIndexed(0, 36);
+            }
         }
+        fglPresent();
     }
 
-    fglPresent();
+    char buf[512];
+    snprintf(buf, 512, "Friskhet! (%ix%i)", WIDTH, HEIGHT);
+    fglDrawDebugText(g_colorRT, buf, 0, 0);
+
+    #ifdef F_ENABLE_PROFILING
+    int py = 8;
+    for (const auto& itr: g_profilerStatistics) {
+        snprintf(buf, 512, "%s: %.3fms", itr.first.c_str(), itr.second);
+        fglDrawDebugText(g_colorRT, buf, 0, py);
+        py += 8;
+    }
+    g_profilerStatistics.clear();
+    #endif
 }
 
 // main loop
@@ -112,8 +126,10 @@ int main(int argc, char *argv[])
                 case SDL_KEYUP:
                     //HandleKeyUp(ev.key.keysym.sym);
                     if (ev.key.keysym.sym == SDLK_ESCAPE) running = false;
-                    if (ev.key.keysym.sym == SDLK_a) g_cameraPos.x -= 1.0F;
-                    if (ev.key.keysym.sym == SDLK_d) g_cameraPos.x += 1.0F;
+                    if (ev.key.keysym.sym == SDLK_w) g_cameraPos.y += 1.0F;
+                    if (ev.key.keysym.sym == SDLK_s) g_cameraPos.y -= 1.0F;
+                    if (ev.key.keysym.sym == SDLK_a) g_cameraPos.x += 1.0F;
+                    if (ev.key.keysym.sym == SDLK_d) g_cameraPos.x -= 1.0F;
                 break;
 
                 case SDL_MOUSEMOTION:
